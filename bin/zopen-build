@@ -759,47 +759,125 @@ checkEnv()
 
 }
 
+# file: bin/zopen-build
 setDepsEnv()
 {
   deps="${ZOPEN_DEPS}"
-
   orig="${PWD}"
+
   # Filter out duplicate deps
   deps=$(echo "${deps}" | xargs | tr ' ' '\n' | sort -u)
+
+  # Variables that represent development exports (kept internal; not printed)
+  DEVEL_VARS="ZOPEN_EXTRA_CFLAGS ZOPEN_EXTRA_CXXFLAGS ZOPEN_EXTRA_LDFLAGS ZOPEN_EXTRA_LIBS PKG_CONFIG_PATH"
+
+  # Save development-related variables into an in-memory string (no files, no subshell).
+  save_devel_vars()
+  {
+    saved=""
+    for v in ${DEVEL_VARS}; do
+      eval "isset=\${${v}+set}"
+      if [ "x${isset}" = "xset" ]; then
+        eval "val=\${${v}}"
+        esc=$(printf '%s' "${val}" | sed "s/'/'\\''/g")
+        saved=$(printf "%s\n%s='%s'" "${saved}" "${v}" "${esc}")
+      else
+        saved=$(printf "%s\n%s=" "${saved}" "${v}")
+      fi
+    done
+    SAVED_DEVEL_STATE=$(printf '%s' "${saved}" | sed '1{/^$/d;}')
+  }
+
+  # Restore previously saved development-related variables from the in-memory string.
+  restore_devel_vars()
+  {
+    save="$1"
+    [ -z "${save}" ] && return 0
+
+    # here-doc so loop runs in current shell
+    while IFS= read -r line || [ -n "${line}" ]; do
+      [ -z "${line}" ] && continue
+      name=${line%%=*}
+      rest=${line#*=}
+      if [ -z "${rest}" ]; then
+        eval "unset ${name} 2>/dev/null || true"
+      else
+        eval "export ${name}=${rest}"
+      fi
+    done <<EOF
+${save}
+EOF
+  }
+
   for dep in ${deps}; do
     printVerbose "Searching for dependency ${dep}"
-    parseline=$(parseDeps ${dep})
-    dep=$(echo ${parseline} | awk -F'|' '{print $1}')
-    operator=$(echo ${parseline} | awk -F'|' '{print $2}')
-    requestedMajor=$(echo ${parseline} | awk -F'|' '{print $3}')
-    requestedMinor=$(echo ${parseline} | awk -F'|' '{print $4}')
-    requestedPatch=$(echo ${parseline} | awk -F'|' '{print $5}')
-    requestedSubrelease=$(echo ${parseline} | awk -F'|' '{print $6}')
+
+    # parse trailing tokens like :bin (only :bin is supported)
+    deparg="${dep}"
+    binOnly="false"
+    while [ "${deparg#*:}" != "${deparg}" ]; do
+      token="${deparg##*:}"
+      deparg="${deparg%:*}"
+      case "${token}" in
+        bin) binOnly="true" ;;
+        *) ;; # ignore unknown tokens (including any :devel specs)
+      esac
+    done
+    dep="${deparg}"
+
+    parseline=$(parseDeps "${dep}")
+    dep=$(echo "${parseline}" | awk -F'|' '{print $1}')
+    operator=$(echo "${parseline}" | awk -F'|' '{print $2}')
+    requestedMajor=$(echo "${parseline}" | awk -F'|' '{print $3}')
+    requestedMinor=$(echo "${parseline}" | awk -F'|' '{print $4}')
+    requestedPatch=$(echo "${parseline}" | awk -F'|' '{print $5}')
+    requestedSubrelease=$(echo "${parseline}" | awk -F'|' '{print $6}')
     requestedVersion="${requestedMajor}.${requestedMinor}.${requestedPatch}.${requestedSubrelease}"
     foundDep=false
-    for path in $(echo ${depsPath} | tr '|' '\n'); do
+
+    for path in $(echo "${depsPath}" | tr '|' '\n'); do
       if [ -r "${path}/${dep}/${dep}/.env" ]; then
         depdir="${path}/${dep}/${dep}"
         versionPath="${depdir}/.version"
         if [ -r "${versionPath}" ]; then
           version=$(cat "${versionPath}")
         fi
+
         # Avoid double sourcing the .env if we're forcing an upgrade on it
         if ! ${forceUpgradeDeps}; then
           if ! validateVersion "${version}" "${operator}" "${requestedVersion}" "${depdir}"; then
             continue
           fi
 
-          printVerbose "Setting up ${depdir} dependency environment"
-          cd "${depdir}" && . ./.env
-          if [ $? -gt 0 ]; then
-            printError "Failed to source ${depdir} .env"
+          if [ "${binOnly}" = "true" ]; then
+            # bin-only: save development-related vars in-memory, source .env so
+            # other runtime exports happen, then restore dev vars so they are unchanged.
+            save_devel_vars
+            cd "${depdir}" && . ./.env
+            if [ $? -gt 0 ]; then
+              printError "Failed to source ${depdir} .env"
+            fi
+            restore_devel_vars "${SAVED_DEVEL_STATE}"
+
+            # ensure depdir/bin is at front of PATH
+            case ":${PATH}:" in
+              *":${depdir}/bin:"*) ;;
+              *) PATH="${depdir}/bin:${PATH}"; export PATH ;;
+            esac
+          else
+            # default behavior: full environment allowed
+            cd "${depdir}" && . ./.env
+            if [ $? -gt 0 ]; then
+              printError "Failed to source ${depdir} .env"
+            fi
           fi
         fi
+
         foundDep=true
         break
       fi
     done
+
     if ! ${foundDep} || ${forceUpgradeDeps}; then
       if ! ${forceUpgradeDeps}; then
         if [ -z "${operator}" ]; then
@@ -816,10 +894,25 @@ setDepsEnv()
       fi
       depdir="${path}/${dep}/${dep}"
       printVerbose "Setting up upgraded ${depdir} dependency environment"
-      cd "${depdir}" && . ./.env
-      if [ $? -gt 0 ]; then
-        printError "Failed to source ${depdir} .env"
+
+      if [ "${binOnly}" = "true" ]; then
+        save_devel_vars
+        cd "${depdir}" && . ./.env
+        if [ $? -gt 0 ]; then
+          printError "Failed to source ${depdir} .env"
+        fi
+        restore_devel_vars "${SAVED_DEVEL_STATE}"
+        case ":${PATH}:" in
+          *":${depdir}/bin:"*) ;;
+          *) PATH="${depdir}/bin:${PATH}"; export PATH ;;
+        esac
+      else
+        cd "${depdir}" && . ./.env
+        if [ $? -gt 0 ]; then
+          printError "Failed to source ${depdir} .env"
+        fi
       fi
+
       versionPath="${depdir}/.version"
       if [ -r "${versionPath}" ]; then
         version=$(cat "${versionPath}")
@@ -829,6 +922,7 @@ setDepsEnv()
       fi
     fi
   done
+
   cd "${orig}" || exit 99
 }
 
