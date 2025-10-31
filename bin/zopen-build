@@ -799,6 +799,11 @@ setDepsEnv()
       [ -z "${line}" ] && continue
       name=${line%%=*}
       rest=${line#*=}
+      # Validate variable name is safe (alphanumeric and underscore only)
+      case "${name}" in
+        *[!A-Za-z0-9_]*) continue ;;  # skip invalid names
+        "") continue ;;
+      esac
       if [ -z "${rest}" ]; then
         eval "unset ${name} 2>/dev/null || true"
       else
