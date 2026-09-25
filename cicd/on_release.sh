@@ -11,6 +11,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 
+# Normalize and export GitHub token for all tools (create_release_cache.py and gh)
+TOKEN="${ZOPEN_GITHUB_OAUTH_TOKEN:-${GITHUB_TOKEN:-${GH_TOKEN:-}}}"
+if [ -z "${TOKEN}" ]; then
+  echo "ERROR: GitHub token must be defined. Please set ZOPEN_GITHUB_OAUTH_TOKEN or GITHUB_TOKEN."
+  exit 1
+fi
+export ZOPEN_GITHUB_OAUTH_TOKEN="${TOKEN}"
+export GITHUB_TOKEN="${TOKEN}"
+export GH_TOKEN="${TOKEN}"
+
 echo "=== Updating Release Metadata and Package Catalogs ==="
 
 mkdir -p docs/api
