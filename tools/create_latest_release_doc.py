@@ -4,7 +4,6 @@ The resulting markdown will be added to the zopen community docs
 """
 
 import json
-import requests
 from datetime import datetime, timedelta
 import argparse
 from collections import defaultdict
@@ -45,12 +44,12 @@ def generate_markdown(data, output_file):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Generate markdown file for newly released tools.')
+    parser.add_argument('--input', '-i', default='docs/api/zopen_releases.json', help='Input JSON file path (default: docs/api/zopen_releases.json)')
     parser.add_argument('--output', '-o', default='Newly_released_tools.md', help='Output markdown file path')
     args = parser.parse_args()
 
-    url = 'https://raw.githubusercontent.com/zopencommunity/meta/main/docs/api/zopen_releases.json'
-    response = requests.get(url)
-    data = response.json()['release_data']
+    with open(args.input, 'r', encoding='utf-8') as f:
+        data = json.load(f)['release_data']
 
     generate_markdown(data, args.output)
 

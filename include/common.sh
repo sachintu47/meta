@@ -31,7 +31,7 @@ zopenInitialize()
     processConfig
   fi
   ZOPEN_ANALYTICS_JSON="${ZOPEN_ROOTFS}/var/lib/zopen/analytics.json"
-  ZOPEN_JSON_CACHE_URL="https://raw.githubusercontent.com/zopencommunity/meta/main/docs/api/zopen_releases.json"
+  ZOPEN_JSON_CACHE_URL="${ZOPEN_JSON_CACHE_URL:-https://github.com/zopencommunity/meta/releases/download/api-cache/zopen_releases.json}"
   ZOPEN_JSON_CONFIG="${ZOPEN_ROOTFS}/etc/zopen/config.json"
   if [ -n "${INCDIR}" ]; then
     ZOPEN_SYSTEM_PREREQ_SCRIPT="${INCDIR}/prereq.sh"
